@@ -27,10 +27,10 @@ validate_argument() {
 }
 
 get_diff_files() {
-  # Only Added(A) files in git (Not modified files)
-  # Because this script will be executed after files are added to the git repo.
-  files=$(git diff --cached --name-only --diff-filter=A)
-  echo "$files"
+  # Only Added(A) DIFF_FILES in git (Not modified DIFF_FILES)
+  # Because this script will be executed after DIFF_FILES are added to the git repo.
+  diff_files=$(git diff --cached --name-only --diff-filter=A)
+  echo "$diff_files"
 }
 
 print_files() {
@@ -42,41 +42,43 @@ print_files() {
   done
 }
 
-FILENAME=$1
-
 has_log_area() {
-  local log_title="## 📜 LOG"
+  local log_file=$1
+  local log_title=$2
 
-  alreadyExists=$(grep -Fc "$log_title" "$1")
+  alreadyExists=$(grep -Fc "$log_title" "$log_file")
   # 0 = true, 1 = false
   [[ $alreadyExists -gt 0 ]] && return 0 || return 1
 }
 
 insert_log_area() {
-  cat >> "$1" <<- EOF
+  local log_file=$1
+  local log_title=$2
+
+  cat >> "$log_file" <<- EOF
 
 <!-- LOG STARTS -->
 
-## 📜 LOG
+$log_title
 
 | Last modified | Article | Summary |
-| --- | --- | --- |
+| --- | --- | --- | <!-- TOP LINE -->
 
 <!-- LOG ENDS -->
 EOF
 }
 
 find_pattern_line() {
-  pattern=$1
-  filename=$2
+  local pattern=$1
+  local filename=$2
 
   line=$(grep -n "$pattern" "$filename" | awk -F: '{print $1}')
   echo "$line"
 }
 
 make_row() {
-  filename=$1
-  logfile=$2
+  local filename=$1
+  local log_file=$2
 
   # Skip if not markdown file
   if ! [[ $filename == *.md ]]; then
@@ -84,13 +86,12 @@ make_row() {
   fi
 
   # Skip if file is argument file
-  if [[ $filename == $2 ]]; then
+  if [[ $filename == $log_file ]]; then
     return 1
   fi
 
   headline=$(git blame -L 1,1 $filename)
 
-  echo_bpurple "headline: $headline"
   if ! [[ -z $headline ]]; then
     last_modified=$(git blame $filename | grep -Eo '\b[[:digit:]]{4}-[[:digit:]]{2}-[[:digit:]]{2}\b' | sort -n | tail -1)
     article=$(echo $headline | awk '{split($0, array, "# "); print array[2]}')
@@ -98,11 +99,8 @@ make_row() {
     # Skip if file is already in LOG.md (we will log only the first time the file is added)
     alreadyExists=$(grep -Fc "$article" "$2")
 
-    echo "alreadyExists: $alreadyExists"
-
     if [[ $alreadyExists -gt 0 ]]; then
-      echo "Skipping already existing $article..."
-      continue;
+      return 1;
     fi
 
     row="| $last_modified | $article | [$filename](./$filename) |"
@@ -110,18 +108,50 @@ make_row() {
   fi
 }
 
-validate_argument $FILENAME
+make_rows() {
+  local log_file=$1
+  local diff_files=$2
 
-files=$(get_diff_files)
-print_files "$files"
+  local rows=""
+  local newline=$'\n'
 
-if ! has_log_area "$FILENAME"; then
-  insert_log_area "$FILENAME"
+  while IFS= read -r filename; do
+    row=$(make_row "$filename" "$log_file")
+    rows+=${row}${newline}
+  done <<< "$(echo "$diff_files")" # `echo $DIFF_FILES` will run in a subshell.
+
+  echo "$rows"
+}
+
+insert_rows() {
+  local log_file=$1
+  local log_title=$2
+  local rows=$3
+
+  top_line=$(find_pattern_line "<!-- TOP LINE -->" "$log_file")
+  top_row_line=$(($top_line + 1))
+
+  echo "top_row_line: $top_row_line"
+
+  ### Resume here to insert rows after the top line
+  # sed -i'' -e "${top_row_line} i $rows" "$log_file"
+}
+
+LOG_FILE=$1
+LOG_TITLE="## 📜 LOG"
+DIFF_FILES=$(get_diff_files)
+
+validate_argument $LOG_FILE
+print_files "$DIFF_FILES"
+
+if ! has_log_area $LOG_FILE $LOG_TITLE; then
+  insert_log_area "$LOG_FILE" "$LOG_TITLE"
   echo_bgreen 'Successfully inserted log area: 📜 LOG'
 else 
-  log_start=$(find_pattern_line "LOG STARTS" "$FILENAME")
-  log_end=$(find_pattern_line "LOG ENDS" "$FILENAME")
-  echo_byellow "Log area already exists: 📜 LOG from L${log_start} to L${log_end}"
+  start_line=$(find_pattern_line "LOG STARTS" $LOG_FILE)
+  end_line=$(find_pattern_line "LOG ENDS" $LOG_FILE)
+  echo_byellow "Log area already exists: 📜 LOG from L${start_line} to L${end_line}"
 fi
 
-# make_row "docs/arguments.md" "$FILENAME"
+rows=$(make_rows "$LOG_FILE" "$DIFF_FILES")
+insert_rows "$LOG_FILE" "$LOG_TITLE" "$rows"
