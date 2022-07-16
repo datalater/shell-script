@@ -1,21 +1,44 @@
 #!/bin/bash
 
+# {{{ specifications }}}
+: '
+지원하는 기능
+- 새롭게 추가된 md 파일을 로그에 추가합니다.
+
+지원되지 않는 기능
+- 삭제된 md 파일을 추적하지 않습니다.
+- 수정된 md 파일을 추적하지 않습니다.
+'
+
+# {{{ output example }}}
+: '
+❯ source main.sh README.md
+
+✅ Added files:
+- docs/echo.md
+
+✅ Successfully inserted log area: 📜 LOG
+
+✅ Inserting rows:
+| 2022-07-16 | echo | [docs/echo.md](./docs/echo.md) |
+'
+
 source ./colors.sh
 
 echo_bred() {
-  echo "\n${BRED}$1${NC}"
+  echo >&2 "\n${BRED}$1${NC}"
 }
 
 echo_bgreen() {
-  echo "\n${BGREEN}$1${NC}"
+  echo >&2 "\n✅ ${BGREEN}$1${NC}"
 }
 
 echo_bpurple() {
-  echo "\n${BPURPLE}$1${NC}"
+  echo >&2 "\n🟣 ${BPURPLE}$1${NC}"
 }
 
 echo_byellow() {
-  echo "\n${BYELLOW}$1${NC}"
+  echo >&2 "\n🟡 ${BYELLOW}$1${NC}"
 }
 
 validate_argument() {
@@ -34,7 +57,7 @@ get_diff_files() {
 }
 
 print_files() {
-  echo_bpurple "Added files:"
+  echo_bgreen "Added files:"
   echo "$1" | while IFS= read -r filename; do 
     if ! [[ -z "$filename" ]]; then
       echo "- $filename"
@@ -62,7 +85,7 @@ insert_log_area() {
 $log_title
 
 | Last modified | Article | Summary |
-| --- | --- | --- | <!-- TOP LINE -->
+| --- | --- | --- | <!-- DELIMITER LINE -->
 
 <!-- LOG ENDS -->
 EOF
@@ -76,6 +99,9 @@ find_pattern_line() {
   echo "$line"
 }
 
+# make_row
+#
+# 필수 요건: row를 만들려면 새로 추가된 diff 파일의 첫번째 라인이 '# '로 시작해야 합니다.
 make_row() {
   local filename=$1
   local log_file=$2
@@ -100,6 +126,7 @@ make_row() {
     alreadyExists=$(grep -Fc "$article" "$2")
 
     if [[ $alreadyExists -gt 0 ]]; then
+      echo_byellow "Skipping already logged file: $filename"
       return 1;
     fi
 
@@ -108,6 +135,9 @@ make_row() {
   fi
 }
 
+# make_rows
+#
+# unused: 현재 함수로 호출하면 정상 동작되지 않아 함수 바디를 복사 붙여넣기 해서 main에서 사용하고 있습니다.
 make_rows() {
   local log_file=$1
   local diff_files=$2
@@ -123,19 +153,37 @@ make_rows() {
   echo "$rows"
 }
 
+# insert_rows
+#
+# Log area에서 DELIMITER LINE의 다음 라인에 새로운 row를 추가합니다.
+# 최근에 작성한 문서가 오름차순으로 나오도록 항상 DELMITER LINE의 다음 라인에 추가합니다.
 insert_rows() {
   local log_file=$1
   local log_title=$2
   local rows=$3
 
-  top_line=$(find_pattern_line "<!-- TOP LINE -->" "$log_file")
-  top_row_line=$(($top_line + 1))
+  # delimiter_line을 기준으로 기존 콘텐츠를 위아래로 나눈다고 했을 때
+  #
+  # ```
+  # previous_content <!-- DELIMITER LINE -->
+  # next_content
+  # ```
+  #
+  # previous_content와 next_content 사이에 새로운 row를 추가합니다
+  delimiter_line=$(find_pattern_line "<!-- DELIMITER LINE -->" "$log_file")
 
-  echo "top_row_line: $top_row_line"
-
-  ### Resume here to insert rows after the top line
-  # sed -i'' -e "${top_row_line} i $rows" "$log_file"
+  total_line=$(wc -l "$log_file" | awk '{print $1}')
+  previous_content=$(head -n $delimiter_line "$log_file")
+  next_content=$(tail -n $(($total_line - $delimiter_line)) "$log_file")
+  
+  cat > "$log_file" <<- EOF
+$previous_content
+$rows
+$next_content
+EOF
 }
+
+# {{{ main }}}
 
 LOG_FILE=$1
 LOG_TITLE="## 📜 LOG"
@@ -150,8 +198,31 @@ if ! has_log_area $LOG_FILE $LOG_TITLE; then
 else 
   start_line=$(find_pattern_line "LOG STARTS" $LOG_FILE)
   end_line=$(find_pattern_line "LOG ENDS" $LOG_FILE)
-  echo_byellow "Log area already exists: 📜 LOG from L${start_line} to L${end_line}"
+  echo_byellow "Log area already exists: 📜 LOG from L${start_line} to L${end_line} in ${LOG_FILE}"
 fi
 
-rows=$(make_rows "$LOG_FILE" "$DIFF_FILES")
-insert_rows "$LOG_FILE" "$LOG_TITLE" "$rows"
+# make_rows 함수 본문
+local log_file=$LOG_FILE
+local diff_files=$DIFF_FILES
+
+local rows=""
+local newline=$'\n'
+
+while IFS= read -r filename; do
+  row=$(make_row "$filename" "$log_file")
+  if [[ ! -z $row ]]; then
+    rows+=${row}${newline}
+  fi
+done <<< "$(echo "$diff_files")" # `echo $DIFF_FILES` will run in a subshell.
+
+if [[ -z $rows ]]; then
+  echo_bred 'No rows to insert'
+else 
+  # row를 append할 때 마지막에 추가된 newline 제거
+  rows=${rows%${newline}}
+
+  echo_bgreen 'Inserting rows:'
+  echo "$rows"
+  insert_rows "$LOG_FILE" "$LOG_TITLE" "$rows"
+fi
+

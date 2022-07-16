@@ -3,6 +3,25 @@
 ## multiline comment
 
 ```sh
+: '
+#!/bin/bash
+
+source ./colors.sh
+
+# inline
+echo "${PURPLE}Added files:${NC}"
+
+# function
+echo_bred() {
+  echo "${BRED}$1${NC}"
+}
+
+echo_red "No argument supplied"
+'
+
+```
+
+```sh
 #!/bin/bash
 
 function validate_argument {
@@ -26,3 +45,7 @@ Usage: ./log.sh <filename>
 comment
 
 ```
+
+## 📚 함께 읽기
+
+- [stackoverflow](https://stackoverflow.com/questions/43158140/way-to-create-multiline-comments-in-bash)

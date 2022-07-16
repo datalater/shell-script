@@ -109,7 +109,7 @@ export ONPURPLE="$onpurple"
 export ONCYAN="$oncyan"
 export ONWHITE="$onwhite"
 
-<<usage
+: ' 
 #!/bin/bash
 
 source ./colors.sh
@@ -123,4 +123,4 @@ echo_bred() {
 }
 
 echo_red "No argument supplied"
-usage
+'
